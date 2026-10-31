@@ -1518,9 +1518,10 @@ fn finish_uninstall(say: bool) {
         message(text("GlassDock 已解除安裝。", "GlassDock has been uninstalled."), MB_ICONINFORMATION);
     }
     if let Some(dir) = install_dir().filter(|dir| Path::new(dir).exists()) {
-        // A command prompt deletes it, trying every second for half a minute: this exe is in it,
-        // and Explorer may keep taskbar_hooks.dll a moment longer.
-        let script = format!("/c for /l %i in (1,1,30) do @if exist \"{dir}\" (rmdir /s /q \"{dir}\" 2>nul & ping -n 2 127.0.0.1 >nul)");
+        // A command prompt deletes it, trying every second for half a minute (this exe is in it,
+        // and Explorer may keep taskbar_hooks.dll a moment longer), and stops as soon as it is
+        // gone, so that it cannot delete a GlassDock installed again right after.
+        let script = format!("/c for /l %i in (1,1,30) do @(rmdir /s /q \"{dir}\" 2>nul & (if not exist \"{dir}\" exit) & ping -n 2 127.0.0.1 >nul)");
         let _ = Command::new("cmd.exe").raw_arg(script).current_dir(std::env::temp_dir()).creation_flags(CREATE_NO_WINDOW).spawn();
     }
 }

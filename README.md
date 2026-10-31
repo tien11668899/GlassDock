@@ -5,6 +5,9 @@ A Windows 11 style taskbar for Windows 10, with a liquid-glass dock behind the i
 
 [English](#english) · [授權 MIT](LICENSE)
 
+<p align="center"><img src="docs/start-menu.png" width="420" alt="毛玻璃開始選單和下面的液態玻璃 Dock / The frosted Start menu above the liquid-glass dock"></p>
+<p align="center"><img src="docs/dock.png" alt="置中的液態玻璃 Dock / The centred liquid-glass dock"></p>
+
 ## 功能
 
 - **置中**：開始按鈕和工作列圖示置中。按鈕是方形的，圖示間距 10 px，開始按鈕換成純白的 Windows 11 圖示。
@@ -14,6 +17,9 @@ A Windows 11 style taskbar for Windows 10, with a liquid-glass dock behind the i
   - 外觀是更透明的毛玻璃，Apple 式連續曲率圓角，裡面的按鈕、列表和磚塊統一圓角與間距。
   - 打開時從 Dock 底下滑出、由窄變寬並淡入，磚塊接著逐一長出來。關閉時滑回 Dock 底下。
   - 開和關可以互相打斷：中途反向時，從當下的位置和速度接著走。
+
+  <img src="docs/opening.png" alt="開始選單從 Dock 底下滑出的過程 / The Start menu sliding out from under the dock">
+
 - **面板置中**：開始選單和搜尋面板都在螢幕中間打開。
 - **乾淨退出**：結束或解除安裝時，工作列會還原成 Windows 原本的樣子。
 
