@@ -1,0 +1,9 @@
+[package]
+name = "disasm"
+version = "0.1.0"
+edition = "2021"
+description = "Disassembles one function of a PE image using its PDB public symbols"
+
+[dependencies]
+pdb = "0.8"
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "intel", "instr_info"] }

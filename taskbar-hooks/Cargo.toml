@@ -1,0 +1,15 @@
+[package]
+name = "taskbar-hooks"
+version = "0.2.0"
+edition = "2021"
+description = "Loaded into explorer.exe by GlassDock: square taskbar buttons and the Windows 11 Start logo"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

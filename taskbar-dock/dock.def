@@ -1,0 +1,3 @@
+LIBRARY taskbar-dock
+EXPORTS
+    dock_place

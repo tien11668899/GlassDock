@@ -1,0 +1,10 @@
+# Build output
+target/
+out/
+/dist/
+*.obj
+*.exp
+*.lib
+
+# Local development: probes, screenshots, logs, Microsoft symbols
+/dev/

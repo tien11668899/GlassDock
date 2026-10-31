@@ -1,0 +1,4 @@
+LIBRARY start-glass
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

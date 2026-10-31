@@ -1,0 +1,32 @@
+// GlassDock's resources. build.rs fills in the folder (@DIR@) and the version from Cargo.toml and
+// compiles this with the Windows SDK's rc.exe.
+
+1 ICON "@DIR@\\icons\\app.ico"
+2 ICON "@DIR@\\icons\\tray.ico"
+1 24 "@DIR@\\app.manifest"
+
+1 VERSIONINFO
+FILEVERSION @NUMBERS@
+PRODUCTVERSION @NUMBERS@
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "tien11668899"
+            VALUE "FileDescription", "GlassDock"
+            VALUE "FileVersion", "@VERSION@"
+            VALUE "InternalName", "GlassDock"
+            VALUE "LegalCopyright", "Copyright (c) 2026 tien11668899. MIT License."
+            VALUE "OriginalFilename", "GlassDock.exe"
+            VALUE "ProductName", "GlassDock"
+            VALUE "ProductVersion", "@VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

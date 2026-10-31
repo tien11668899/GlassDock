@@ -1,0 +1,18 @@
+[package]
+name = "glassdock"
+version = "0.1.0"
+edition = "2021"
+description = "GlassDock: a Windows 11 style taskbar for Windows 10, with a liquid-glass dock"
+license = "MIT"
+build = "build.rs"
+
+[[bin]]
+name = "GlassDock"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
