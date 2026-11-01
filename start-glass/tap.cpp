@@ -300,6 +300,68 @@ void Dump(DependencyObject const& node, UIElement const& origin, int depth, int&
     }
 }
 
+// What composition draws for `element` besides its XAML content: a child visual (with a drop
+// shadow, if it has one) and a ThemeShadow.
+std::wstring Extras(UIElement const& element) {
+    std::wstringstream line;
+    try {
+        if (auto child = ElementCompositionPreview::GetElementChildVisual(element)) {
+            line << L" child=" << get_class_name(child).c_str() << L" " << child.Size().x << L"x" << child.Size().y << L" at "
+                 << child.Offset().x << L"," << child.Offset().y;
+            if (auto sprite = child.try_as<SpriteVisual>()) {
+                if (auto shadow = sprite.Shadow().try_as<DropShadow>()) {
+                    line << L" DROPSHADOW blur " << shadow.BlurRadius() << L" offset " << shadow.Offset().y << L" opacity " << shadow.Opacity();
+                }
+            }
+            if (auto container = child.try_as<ContainerVisual>()) line << L" children " << container.Children().Count();
+        }
+        if (element.Shadow()) line << L" THEMESHADOW";
+        if (element.Translation().z != 0) line << L" z=" << element.Translation().z;
+        if (element.Opacity() != 1) line << L" opacity=" << element.Opacity();
+    } catch (...) {
+        line << L" (extras failed)";
+    }
+    return line.str();
+}
+
+// Everything around the menu: each ancestor of `container` up to the root, with all of its
+// children (the one on the way marked with >), and what composition draws for each besides the
+// XAML. The menu's shadow is drawn by one of these, not inside the menu.
+void DumpAround(UIElement const& container) {
+    DependencyObject node = container;
+    for (int level = 1; level < 40; ++level) {
+        auto parent = VisualTreeHelper::GetParent(node);
+        if (!parent) break;
+        auto element = parent.try_as<FrameworkElement>();
+        std::wstringstream line;
+        line << L"UP" << level << L" " << get_class_name(parent).c_str() << L" '" << (element ? element.Name().c_str() : L"") << L"'";
+        if (element) {
+            const auto r = element.TransformToVisual(container).TransformBounds(
+                { 0, 0, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight()) });
+            line << L" " << r.X << L"," << r.Y << L" " << r.Width << L"x" << r.Height << Extras(element);
+        }
+        Log(line.str());
+        const int count = VisualTreeHelper::GetChildrenCount(parent);
+        for (int i = 0; i < count; ++i) {
+            auto child = VisualTreeHelper::GetChild(parent, i);
+            auto sibling = child.try_as<FrameworkElement>();
+            std::wstringstream entry;
+            entry << L"   " << (child == node ? L">" : L" ") << L" " << get_class_name(child).c_str() << L" '"
+                  << (sibling ? sibling.Name().c_str() : L"") << L"'";
+            if (sibling) {
+                const auto r = sibling.TransformToVisual(container).TransformBounds(
+                    { 0, 0, static_cast<float>(sibling.ActualWidth()), static_cast<float>(sibling.ActualHeight()) });
+                entry << L" " << r.X << L"," << r.Y << L" " << r.Width << L"x" << r.Height
+                      << (sibling.Visibility() == Visibility::Visible ? L"" : L" collapsed") << Extras(sibling);
+                const auto m = sibling.Margin();
+                if (m.Left || m.Top || m.Right || m.Bottom) entry << L" m=" << Thickness4(m);
+            }
+            Log(entry.str());
+        }
+        node = parent;
+    }
+}
+
 // Writes the layout map once, a few seconds after the menu first appeared (its lists and
 // tiles are realised by then).
 void ScheduleDump(UIElement const& container) {
@@ -310,6 +372,8 @@ void ScheduleDump(UIElement const& container) {
         sender.as<DispatcherTimer>().Stop();
         try {
             if (auto container = weakContainer.get()) {
+                Log(L"=== around the menu");
+                DumpAround(container);
                 Log(L"=== layout dump");
                 int budget = 2500;
                 Dump(container, container, 0, budget);
@@ -480,6 +544,7 @@ constexpr float GROW_SPAN_S = 0.36f;              // a recipe page's 20 items: m
 
 weak_ref<Border> g_background{ nullptr };         // the menu's acrylic background
 weak_ref<UIElement> g_menu{ nullptr };            // its container: what grows
+weak_ref<UIElement> g_shadow{ nullptr };          // StartUI's shadow image around it, which grows along
 CompositionClip g_menuClip{ nullptr };            // RoundCorners' smoothed clip, given back once grown
 HWND g_startWindow = nullptr;                     // the menu's CoreWindow
 std::vector<weak_ref<FrameworkElement>> g_growers; // the tiles
@@ -618,6 +683,36 @@ void EnsureMorph(Compositor const& compositor) {
     for (auto name : { L"S0", L"BarH", L"MenuW", L"MenuH", L"Cx", L"Cy", L"Tx0", L"Ty0", L"RBar", L"RMenu", L"Fade" }) {
         g_morph.values.InsertScalar(name, 1);
     }
+    g_morph.values.InsertScalar(L"ShadowX", 0);
+    g_morph.values.InsertScalar(L"ShadowY", 0);
+}
+
+// StartUI draws the menu's shadow with an Image named DropShadow next to the menu (a few levels
+// up, 13 DIPs larger all round), so it does not grow with the menu by itself.
+UIElement FindShadow(UIElement const& menu) {
+    DependencyObject node = menu;
+    for (int level = 0; level < 8; ++level) {
+        auto parent = VisualTreeHelper::GetParent(node);
+        if (!parent) break;
+        const int count = VisualTreeHelper::GetChildrenCount(parent);
+        for (int i = 0; i < count; ++i) {
+            auto element = VisualTreeHelper::GetChild(parent, i).try_as<FrameworkElement>();
+            if (element && element.Name() == L"DropShadow") return element;
+        }
+        node = parent;
+    }
+    return nullptr;
+}
+
+// Where the menu's origin is in the shadow's coordinates (13 DIPs in, at whole pixels), for
+// growing the shadow about the menu's bottom middle. Measured while the menu is not morphed.
+void MeasureShadow(UIElement const& menu) {
+    auto shadow = g_shadow.get();
+    if (!shadow || g_morph.bound || !g_morph.values) return;
+    const auto at = shadow.TransformToVisual(menu).TransformPoint({ 0, 0 });
+    g_morph.values.InsertScalar(L"ShadowX", -at.X);
+    g_morph.values.InsertScalar(L"ShadowY", -at.Y);
+    if (g_settings.log) Log(L"SHADOW at " + std::to_wstring(at.X) + L"," + std::to_wstring(at.Y) + L" from the menu");
 }
 
 // Puts the menu's and the dock's shapes (in the window's DIPs) into the morph's values, and the
@@ -675,6 +770,7 @@ bool MeasureMorph(UIElement const& menu, Border const& background, bool settled)
     v.InsertScalar(L"RBar", barRadius);
     v.InsertScalar(L"RMenu", g_settings.radius);
     v.InsertScalar(L"Fade", FADE_IN);
+    if (settled) MeasureShadow(menu);
     if (g_settings.log) {
         const auto menuAt = menu.TransformToVisual(nullptr).TransformPoint({ 0, 0 });
         std::wstringstream line;
@@ -689,6 +785,7 @@ bool MeasureMorph(UIElement const& menu, Border const& background, bool settled)
 }
 
 // The menu follows the morph's progress P: its scale, its place, its opacity and a rounded clip.
+// Its shadow does the same about the same point, so that it stays around the menu as it grows.
 void BindMorph(UIElement const& menu) {
     auto visual = ElementCompositionPreview::GetElementVisual(menu);
     auto compositor = visual.Compositor();
@@ -703,21 +800,29 @@ void BindMorph(UIElement const& menu) {
     // as far below the window's bottom edge (the top of the taskbar) as the scaled menu is tall,
     // so the menu starts hidden under the dock and slides up out of it.
     const std::wstring s = L"(m.S0 + (1 - m.S0) * m.P)";
-    ElementCompositionPreview::SetIsTranslationEnabled(menu, true);
-    visual.StartAnimation(L"CenterPoint", expression(L"Vector3(m.Cx, m.Cy, 0)"));
-    visual.StartAnimation(L"Scale", expression(L"Vector3(" + s + L", " + s + L", 1)"));
-    visual.StartAnimation(L"Translation", expression(L"Vector3(m.Tx0 * (1 - m.P), (m.Ty0 + m.S0 * m.MenuH) * (1 - m.P), 0)"));
-    visual.StartAnimation(L"Opacity", expression(L"Clamp(m.P / m.Fade, 0, 1)"));
+    auto follow = [&](UIElement const& element, std::wstring const& centre) {
+        auto target = ElementCompositionPreview::GetElementVisual(element);
+        ElementCompositionPreview::SetIsTranslationEnabled(element, true);
+        target.StartAnimation(L"CenterPoint", expression(centre));
+        target.StartAnimation(L"Scale", expression(L"Vector3(" + s + L", " + s + L", 1)"));
+        target.StartAnimation(L"Translation", expression(L"Vector3(m.Tx0 * (1 - m.P), (m.Ty0 + m.S0 * m.MenuH) * (1 - m.P), 0)"));
+        target.StartAnimation(L"Opacity", expression(L"Clamp(m.P / m.Fade, 0, 1)"));
+    };
+    follow(menu, L"Vector3(m.Cx, m.Cy, 0)");
+    if (auto shadow = g_shadow.get()) follow(shadow, L"Vector3(m.Cx + m.ShadowX, m.Cy + m.ShadowY, 0)");
     g_morph.bound = true;
 }
 
-// The menu stops following P: as laid out.
+// The menu and its shadow stop following P: as laid out.
 void UnbindMorph(UIElement const& menu) {
-    auto visual = ElementCompositionPreview::GetElementVisual(menu);
-    for (auto name : { L"CenterPoint", L"Scale", L"Translation", L"Opacity" }) visual.StopAnimation(name);
-    visual.Scale({ 1, 1, 1 });
-    visual.Properties().InsertVector3(L"Translation", { 0, 0, 0 });
-    visual.Opacity(1);
+    for (auto element : { menu, g_shadow.get() }) {
+        if (!element) continue;
+        auto visual = ElementCompositionPreview::GetElementVisual(element);
+        for (auto name : { L"CenterPoint", L"Scale", L"Translation", L"Opacity" }) visual.StopAnimation(name);
+        visual.Scale({ 1, 1, 1 });
+        visual.Properties().InsertVector3(L"Translation", { 0, 0, 0 });
+        visual.Opacity(1);
+    }
     g_morph.bound = false;
 }
 
@@ -733,6 +838,7 @@ void PrepareOpen() {
     if (g_morph.bound) UnbindMorph(menu);
     MeasureMorph(menu, background, true);
     ElementCompositionPreview::GetElementVisual(menu).Opacity(0);
+    if (auto shadow = g_shadow.get()) ElementCompositionPreview::GetElementVisual(shadow).Opacity(0);
 }
 
 // The tiles grow from their centres one after another, in reading order.
@@ -879,6 +985,12 @@ void WatchMenu(Border const& background, UIElement const& container) {
     if (!g_settings.open) return;
     g_background = make_weak(background);
     g_menu = make_weak(container);
+    if (auto shadow = FindShadow(container)) {
+        g_shadow = make_weak(shadow);
+        EnsureMorph(ElementCompositionPreview::GetElementVisual(container).Compositor());
+        MeasureShadow(container);
+        Log(L"shadow found");
+    }
     EnsureWatching();
     BOOL cloaked = FALSE;
     if (g_startWindow && SUCCEEDED(DwmGetWindowAttribute(g_startWindow, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked) {
