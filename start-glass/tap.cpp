@@ -27,6 +27,10 @@
 //   targets=...      element names to change, comma separated (empty: every acrylic background)
 //   open=1           the menu slides out from under the dock (0: Windows' own opening)
 //   cascade=1        and then its tiles grow in one after another (0: they come with it)
+//   shadow_blur=14   the menu's shadow (with rounded corners: Windows' own is square): blur in
+//                    DIPs (0: Windows' own shadow)
+//   shadow_drop=2    how far down it falls, in DIPs
+//   shadow_opacity=45 how dark it is, in percent
 //   log=1            append what was found to start-glass.log in the Start host's temp folder
 //   dump=1           with log=1, also write a layout map of the menu and of each menu opened
 
@@ -88,6 +92,9 @@ struct Settings {
     std::vector<std::wstring> targets;
     bool open = true;
     bool cascade = true;
+    float shadowBlur = 14;
+    float shadowDrop = 2;
+    float shadowOpacity = 0.45f;
     bool log = false;
     bool dump = false;
 };
@@ -129,6 +136,9 @@ void LoadSettings() {
         else if (key == L"tile_shift") g_settings.tileShift = static_cast<float>(_wtoi(value.c_str()));
         else if (key == L"open") g_settings.open = value != L"0";
         else if (key == L"cascade") g_settings.cascade = value != L"0";
+        else if (key == L"shadow_blur") g_settings.shadowBlur = static_cast<float>(std::clamp(_wtoi(value.c_str()), 0, 64));
+        else if (key == L"shadow_drop") g_settings.shadowDrop = static_cast<float>(std::clamp(_wtoi(value.c_str()), -32, 32));
+        else if (key == L"shadow_opacity") g_settings.shadowOpacity = std::clamp(_wtoi(value.c_str()), 0, 100) / 100.0f;
         else if (key == L"log") g_settings.log = value == L"1";
         else if (key == L"dump") g_settings.dump = value == L"1";
         else if (key == L"targets") {
@@ -165,9 +175,11 @@ bool IsTarget(std::wstring_view name) {
 // A rectangle with continuous-curvature corners, the way Figma draws "corner smoothing":
 // each corner is a circular arc that shrinks as smoothing grows, eased into the straight
 // edges by two cubic Béziers that start (1 + smoothing) x radius away from the corner.
+// With `outside`, the shape is that rectangle less this one instead (a frame around it).
 // Composition asks for it as a Direct2D geometry through IGeometrySource2DInterop.
 struct SmoothRoundedRect : implements<SmoothRoundedRect, winrt::Windows::Graphics::IGeometrySource2D, ABI::Windows::Graphics::IGeometrySource2DInterop> {
-    SmoothRoundedRect(D2D1_RECT_F rect, float radius, float smoothing) : m_rect(rect), m_radius(radius), m_smoothing(smoothing) {}
+    SmoothRoundedRect(D2D1_RECT_F rect, float radius, float smoothing, D2D1_RECT_F outside = {})
+        : m_rect(rect), m_radius(radius), m_smoothing(smoothing), m_outside(outside) {}
 
     HRESULT STDMETHODCALLTYPE GetGeometry(ID2D1Geometry** value) noexcept override {
         com_ptr<ID2D1Factory> factory;
@@ -188,6 +200,14 @@ private:
         if (SUCCEEDED(hr)) hr = path->Open(sink.put());
         if (FAILED(hr)) return hr;
 
+        if (m_outside.right > m_outside.left && m_outside.bottom > m_outside.top) {
+            sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE); // the rounded rectangle is a hole in this one
+            sink->BeginFigure(D2D1::Point2F(m_outside.left, m_outside.top), D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLine(D2D1::Point2F(m_outside.right, m_outside.top));
+            sink->AddLine(D2D1::Point2F(m_outside.right, m_outside.bottom));
+            sink->AddLine(D2D1::Point2F(m_outside.left, m_outside.bottom));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        }
         const float x0 = m_rect.left, y0 = m_rect.top;
         const float w = m_rect.right - m_rect.left, h = m_rect.bottom - m_rect.top;
         // Corner budget: half the shorter side. Too little room: give up smoothing first.
@@ -242,6 +262,7 @@ private:
     D2D1_RECT_F m_rect;
     float m_radius;
     float m_smoothing;
+    D2D1_RECT_F m_outside;
 };
 
 std::wstring Thickness4(Thickness const& t) {
@@ -403,8 +424,8 @@ float Scale(UIElement const& element) {
     return 1;
 }
 
-CompositionPathGeometry SmoothGeometry(Compositor const& compositor, D2D1_RECT_F const& rect, float radius) {
-    auto shape = make<SmoothRoundedRect>(rect, radius, g_settings.smoothing);
+CompositionPathGeometry SmoothGeometry(Compositor const& compositor, D2D1_RECT_F const& rect, float radius, D2D1_RECT_F outside = {}) {
+    auto shape = make<SmoothRoundedRect>(rect, radius, g_settings.smoothing, outside);
     return compositor.CreatePathGeometry(CompositionPath(shape.as<winrt::Windows::Graphics::IGeometrySource2D>()));
 }
 
@@ -683,12 +704,13 @@ void EnsureMorph(Compositor const& compositor) {
     for (auto name : { L"S0", L"BarH", L"MenuW", L"MenuH", L"Cx", L"Cy", L"Tx0", L"Ty0", L"RBar", L"RMenu", L"Fade" }) {
         g_morph.values.InsertScalar(name, 1);
     }
-    g_morph.values.InsertScalar(L"ShadowX", 0);
-    g_morph.values.InsertScalar(L"ShadowY", 0);
+    g_morph.values.InsertScalar(L"ShadeX", 0);
+    g_morph.values.InsertScalar(L"ShadeY", 0);
 }
 
 // StartUI draws the menu's shadow with an Image named DropShadow next to the menu (a few levels
-// up, 13 DIPs larger all round), so it does not grow with the menu by itself.
+// up, 13 DIPs larger all round), made for square corners. GlassDock hides it and draws one of
+// its own in the same panel (see FitShadow).
 UIElement FindShadow(UIElement const& menu) {
     DependencyObject node = menu;
     for (int level = 0; level < 8; ++level) {
@@ -704,15 +726,69 @@ UIElement FindShadow(UIElement const& menu) {
     return nullptr;
 }
 
-// Where the menu's origin is in the shadow's coordinates (13 DIPs in, at whole pixels), for
-// growing the shadow about the menu's bottom middle. Measured while the menu is not morphed.
-void MeasureShadow(UIElement const& menu) {
-    auto shadow = g_shadow.get();
-    if (!shadow || g_morph.bound || !g_morph.values) return;
-    const auto at = shadow.TransformToVisual(menu).TransformPoint({ 0, 0 });
-    g_morph.values.InsertScalar(L"ShadowX", -at.X);
-    g_morph.values.InsertScalar(L"ShadowY", -at.Y);
-    if (g_settings.log) Log(L"SHADOW at " + std::to_wstring(at.X) + L"," + std::to_wstring(at.Y) + L" from the menu");
+// The menu's shadow: the menu's own shape (the smoothed corners of its clip) casting a soft drop
+// shadow, in a visual over the panel that holds StartUI's shadow image. Nothing is behind the
+// menu to put it in, so it is clipped to everything around the menu less the menu's shape: it
+// darkens only what is outside. It follows the menu's morph like the menu does.
+struct MenuShadow {
+    ContainerVisual frame{ nullptr };          // clipped to around the menu
+    SpriteVisual caster{ nullptr };            // the menu's shape, casting the shadow
+    ShapeVisual outline{ nullptr };            // that shape, drawn into the shadow's mask
+    CompositionSpriteShape fill{ nullptr };
+    CompositionVisualSurface surface{ nullptr };
+};
+MenuShadow g_menuShadow;
+
+// Makes the shadow (once, hiding StartUI's square one) and fits it to `background` in `menu`
+// (its container): place, size, corners. Not while the menu is morphed (its layout reads
+// moved then); MeasureMorph fits it again once the menu has settled.
+void FitShadow(UIElement const& menu, Border const& background) {
+    auto image = g_shadow.get();
+    auto panel = image ? VisualTreeHelper::GetParent(image).try_as<UIElement>() : nullptr;
+    const float w = static_cast<float>(background.ActualWidth()), h = static_cast<float>(background.ActualHeight());
+    if (!panel || w <= 0 || h <= 0 || g_settings.radius <= 0 || g_settings.shadowBlur <= 0 || g_morph.bound) return;
+    auto compositor = ElementCompositionPreview::GetElementVisual(panel).Compositor();
+    auto& s = g_menuShadow;
+    if (!s.frame) {
+        ElementCompositionPreview::GetElementVisual(image).IsVisible(false);
+        s.outline = compositor.CreateShapeVisual();
+        s.fill = compositor.CreateSpriteShape();
+        s.fill.FillBrush(compositor.CreateColorBrush(winrt::Windows::UI::Colors::White()));
+        s.outline.Shapes().Append(s.fill);
+        s.surface = compositor.CreateVisualSurface();
+        s.surface.SourceVisual(s.outline);
+        auto shadow = compositor.CreateDropShadow();
+        shadow.Mask(compositor.CreateSurfaceBrush(s.surface));
+        shadow.BlurRadius(g_settings.shadowBlur);
+        shadow.Offset({ 0, g_settings.shadowDrop, 0 });
+        shadow.Color(winrt::Windows::UI::Colors::Black());
+        shadow.Opacity(g_settings.shadowOpacity);
+        s.caster = compositor.CreateSpriteVisual();
+        s.caster.Shadow(shadow);
+        s.frame = compositor.CreateContainerVisual();
+        s.frame.Children().InsertAtTop(s.caster);
+        ElementCompositionPreview::SetElementChildVisual(panel, s.frame);
+    }
+    const auto at = background.TransformToVisual(panel).TransformPoint({ 0, 0 });
+    s.outline.Size({ w, h });
+    s.fill.Geometry(SmoothGeometry(compositor, D2D1::RectF(0, 0, w, h), g_settings.radius));
+    s.surface.SourceSize({ w, h });
+    s.caster.Size({ w, h });
+    s.caster.Offset({ at.X, at.Y, 0 });
+    const float reach = 3 * g_settings.shadowBlur + std::fabs(g_settings.shadowDrop);
+    const auto shape = D2D1::RectF(at.X, at.Y, at.X + w, at.Y + h);
+    const auto around = D2D1::RectF(shape.left - reach, shape.top - reach, shape.right + reach, shape.bottom + reach);
+    s.frame.Clip(compositor.CreateGeometricClip(SmoothGeometry(compositor, shape, g_settings.radius, around)));
+    // The menu's container in the panel: the morph grows the shadow about the menu's point.
+    if (g_morph.values) {
+        const auto origin = menu.TransformToVisual(panel).TransformPoint({ 0, 0 });
+        g_morph.values.InsertScalar(L"ShadeX", origin.X);
+        g_morph.values.InsertScalar(L"ShadeY", origin.Y);
+    }
+    if (g_settings.log) {
+        Log(L"SHADOW " + std::to_wstring(w) + L"x" + std::to_wstring(h) + L" at " + std::to_wstring(at.X) + L"," + std::to_wstring(at.Y) +
+            L" in the panel");
+    }
 }
 
 // Puts the menu's and the dock's shapes (in the window's DIPs) into the morph's values, and the
@@ -770,7 +846,7 @@ bool MeasureMorph(UIElement const& menu, Border const& background, bool settled)
     v.InsertScalar(L"RBar", barRadius);
     v.InsertScalar(L"RMenu", g_settings.radius);
     v.InsertScalar(L"Fade", FADE_IN);
-    if (settled) MeasureShadow(menu);
+    if (settled) FitShadow(menu, background);
     if (g_settings.log) {
         const auto menuAt = menu.TransformToVisual(nullptr).TransformPoint({ 0, 0 });
         std::wstringstream line;
@@ -809,19 +885,27 @@ void BindMorph(UIElement const& menu) {
         target.StartAnimation(L"Opacity", expression(L"Clamp(m.P / m.Fade, 0, 1)"));
     };
     follow(menu, L"Vector3(m.Cx, m.Cy, 0)");
-    if (auto shadow = g_shadow.get()) follow(shadow, L"Vector3(m.Cx + m.ShadowX, m.Cy + m.ShadowY, 0)");
+    if (auto frame = g_menuShadow.frame) { // a visual of its own: its Offset is the translation
+        frame.StartAnimation(L"CenterPoint", expression(L"Vector3(m.Cx + m.ShadeX, m.Cy + m.ShadeY, 0)"));
+        frame.StartAnimation(L"Scale", expression(L"Vector3(" + s + L", " + s + L", 1)"));
+        frame.StartAnimation(L"Offset", expression(L"Vector3(m.Tx0 * (1 - m.P), (m.Ty0 + m.S0 * m.MenuH) * (1 - m.P), 0)"));
+        frame.StartAnimation(L"Opacity", expression(L"Clamp(m.P / m.Fade, 0, 1)"));
+    }
     g_morph.bound = true;
 }
 
 // The menu and its shadow stop following P: as laid out.
 void UnbindMorph(UIElement const& menu) {
-    for (auto element : { menu, g_shadow.get() }) {
-        if (!element) continue;
-        auto visual = ElementCompositionPreview::GetElementVisual(element);
-        for (auto name : { L"CenterPoint", L"Scale", L"Translation", L"Opacity" }) visual.StopAnimation(name);
-        visual.Scale({ 1, 1, 1 });
-        visual.Properties().InsertVector3(L"Translation", { 0, 0, 0 });
-        visual.Opacity(1);
+    auto visual = ElementCompositionPreview::GetElementVisual(menu);
+    for (auto name : { L"CenterPoint", L"Scale", L"Translation", L"Opacity" }) visual.StopAnimation(name);
+    visual.Scale({ 1, 1, 1 });
+    visual.Properties().InsertVector3(L"Translation", { 0, 0, 0 });
+    visual.Opacity(1);
+    if (auto frame = g_menuShadow.frame) {
+        for (auto name : { L"CenterPoint", L"Scale", L"Offset", L"Opacity" }) frame.StopAnimation(name);
+        frame.Scale({ 1, 1, 1 });
+        frame.Offset({ 0, 0, 0 });
+        frame.Opacity(1);
     }
     g_morph.bound = false;
 }
@@ -838,7 +922,7 @@ void PrepareOpen() {
     if (g_morph.bound) UnbindMorph(menu);
     MeasureMorph(menu, background, true);
     ElementCompositionPreview::GetElementVisual(menu).Opacity(0);
-    if (auto shadow = g_shadow.get()) ElementCompositionPreview::GetElementVisual(shadow).Opacity(0);
+    if (auto frame = g_menuShadow.frame) frame.Opacity(0);
 }
 
 // The tiles grow from their centres one after another, in reading order.
@@ -988,7 +1072,7 @@ void WatchMenu(Border const& background, UIElement const& container) {
     if (auto shadow = FindShadow(container)) {
         g_shadow = make_weak(shadow);
         EnsureMorph(ElementCompositionPreview::GetElementVisual(container).Compositor());
-        MeasureShadow(container);
+        FitShadow(container, background);
         Log(L"shadow found");
     }
     EnsureWatching();
@@ -1065,6 +1149,7 @@ void RoundCorners(Border const& background) {
             auto compositor = visual.Compositor();
             g_menuClip = compositor.CreateGeometricClip(SmoothGeometry(compositor, rect, g_settings.radius));
             visual.Clip(g_menuClip);
+            FitShadow(container, background); // the menu was resized: its shadow too
             std::wstringstream line;
             line << L"ROUND " << Describe(container) << L" clip " << origin.X << L"," << origin.Y << L" " << w << L"x" << h
                  << L" radius=" << g_settings.radius << L" smoothing=" << g_settings.smoothing;

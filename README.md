@@ -14,7 +14,7 @@ A Windows 11 style taskbar for Windows 10, with a liquid-glass dock behind the i
 - **液態玻璃 Dock**：圖示後面一條玻璃底座，有折射、色散、邊緣光和陰影。開關應用時，Dock 會伸縮，整排圖示會一起滑到新的置中位置。
 - **高亮**：滑鼠移過圖示時是白色圓角方框，目前使用中的應用是玻璃選取框，兩者都用彈簧動畫在圖示之間滑動。
 - **開始選單**：
-  - 外觀是更透明的毛玻璃，Apple 式連續曲率圓角，裡面的按鈕、列表和磚塊統一圓角與間距。
+  - 外觀是更透明的毛玻璃，Apple 式連續曲率圓角，裡面的按鈕、列表和磚塊統一圓角與間距。陰影也跟著圓角。
   - 打開時從 Dock 底下滑出、由窄變寬並淡入，磚塊接著逐一長出來。關閉時滑回 Dock 底下。
   - 開和關可以互相打斷：中途反向時，從當下的位置和速度接著走。
 
@@ -75,6 +75,9 @@ A Windows 11 style taskbar for Windows 10, with a liquid-glass dock behind the i
 | `targets` | AcrylicBorder | 要改的元素名稱，逗號分隔（空白 = 所有壓克力背景） |
 | `open` | 1 | 0 = 用 Windows 原本的開啟動畫 |
 | `cascade` | 1 | 0 = 磚塊不逐一長出 |
+| `shadow_blur` | 14 | 選單陰影（跟選單一樣的圓角）的模糊（DIP，0 = 用 Windows 原本的直角陰影） |
+| `shadow_drop` | 2 | 陰影往下偏移（DIP） |
+| `shadow_opacity` | 45 | 陰影濃度（%） |
 | `log` | 0 | 1 = 寫入開始選單程序暫存資料夾裡的 `start-glass.log` |
 
 ## 運作方式
@@ -116,7 +119,7 @@ GlassDock makes the Windows 10 taskbar look like the Windows 11 one, and puts a 
 - **Liquid-glass dock.** A glass base behind the icons, with refraction, dispersion, a Fresnel rim and a shadow. When apps open or close, it stretches and the whole row glides to its new centred place.
 - **Highlights.** The hover highlight is a white rounded square and the active app gets a glass selection. Both slide from icon to icon on springs.
 - **Start menu.**
-  - More see-through frosted acrylic, with Apple-style continuous-curvature corners and one radius and spacing for everything inside.
+  - More see-through frosted acrylic, with Apple-style continuous-curvature corners (the shadow follows them too) and one radius and spacing for everything inside.
   - It slides out from under the dock as it opens, growing from the dock's width and fading in, and then its tiles grow in. It slides back under the dock as it closes.
   - Opening and closing interrupt each other smoothly: a reversal carries on from the current position and speed.
 - **Centred panels.** The Start menu and the Search pane open centred.

@@ -353,7 +353,7 @@ const DOCK_INI: &str = "; GlassDock's dock (see the README). Restart GlassDock f
 frost=2\r\nshadow=100\r\nsmoothing=60\r\nperiod=380\r\nfps=30\r\nlog=0\r\n";
 const GLASS_INI: &str = "; GlassDock's Start menu (see the README). Restart GlassDock from its menu to apply.\r\n\
 tint=12\r\nluminosity=40\r\nradius=16\r\nsmoothing=60\r\ninner_radius=8\r\nnav_inset=8\r\nrow_gap=4\r\ntile_gap=8\r\n\
-row_trim=2\r\ntile_shift=2\r\ntargets=AcrylicBorder\r\nopen=1\r\ncascade=1\r\nlog=0\r\n";
+row_trim=2\r\ntile_shift=2\r\ntargets=AcrylicBorder\r\nopen=1\r\ncascade=1\r\nshadow_blur=14\r\nshadow_drop=2\r\nshadow_opacity=45\r\nlog=0\r\n";
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const UNINSTALL_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GlassDock";
 /// The hidden window that owns the notification-area icon (and lets another copy find this one).
